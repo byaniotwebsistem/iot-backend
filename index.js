@@ -1,9 +1,28 @@
 const mqtt = require("mqtt");
 const admin = require("firebase-admin");
+const express = require("express");
 require("dotenv").config();
 
+// ================= VALIDACIÓN DE VARIABLES =================
+if (!process.env.FIREBASE_KEY) {
+  console.error("❌ ERROR: FIREBASE_KEY no definido");
+  process.exit(1);
+}
+
+if (!process.env.MQTT_HOST || !process.env.MQTT_USER || !process.env.MQTT_PASS) {
+  console.error("❌ ERROR: Datos MQTT incompletos");
+  process.exit(1);
+}
+
 // ================= FIREBASE =================
-const serviceAccount = require("./serviceAccountKey.json");
+let serviceAccount;
+
+try {
+  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+} catch (error) {
+  console.error("❌ ERROR parseando FIREBASE_KEY:", error.message);
+  process.exit(1);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -16,7 +35,8 @@ const db = admin.database();
 const client = mqtt.connect(`mqtts://${process.env.MQTT_HOST}`, {
   port: 8883,
   username: process.env.MQTT_USER,
-  password: process.env.MQTT_PASS
+  password: process.env.MQTT_PASS,
+  reconnectPeriod: 5000 // reconexión automática
 });
 
 // ---------------- CONEXIÓN ----------------
@@ -32,6 +52,11 @@ client.on("connect", () => {
 // ---------------- ERRORES MQTT ----------------
 client.on("error", (err) => {
   console.log("❌ Error MQTT:", err.message);
+});
+
+// ---------------- RECONEXIÓN ----------------
+client.on("reconnect", () => {
+  console.log("🔄 Reintentando conexión MQTT...");
 });
 
 // ---------------- MQTT → FIREBASE ----------------
@@ -55,4 +80,16 @@ db.ref("casa").on("child_changed", snapshot => {
   console.log("🔁 Firebase → MQTT:", key, value);
 
   client.publish(`casa/${key}`, String(value));
+});
+
+// ================= SERVIDOR WEB (RENDER) =================
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("🚀 IoT Backend activo 24/7");
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("🌐 Servidor corriendo en puerto", PORT);
 });
