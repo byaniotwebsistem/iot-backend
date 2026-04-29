@@ -3,7 +3,7 @@ const admin = require("firebase-admin");
 const express = require("express");
 require("dotenv").config();
 
-// ================= VALIDACIÓN DE VARIABLES =================
+// ================= VALIDACIÓN =================
 if (!process.env.FIREBASE_KEY) {
   console.error("❌ ERROR: FIREBASE_KEY no definido");
   process.exit(1);
@@ -31,12 +31,15 @@ admin.initializeApp({
 
 const db = admin.database();
 
+// 🧠 MEMORIA PARA EVITAR BUCLES
+const estados = {};
+
 // ================= MQTT =================
 const client = mqtt.connect(`mqtts://${process.env.MQTT_HOST}`, {
   port: 8883,
   username: process.env.MQTT_USER,
   password: process.env.MQTT_PASS,
-  reconnectPeriod: 5000 // reconexión automática
+  reconnectPeriod: 5000
 });
 
 // ---------------- CONEXIÓN ----------------
@@ -49,12 +52,11 @@ client.on("connect", () => {
   });
 });
 
-// ---------------- ERRORES MQTT ----------------
+// ---------------- ERRORES ----------------
 client.on("error", (err) => {
   console.log("❌ Error MQTT:", err.message);
 });
 
-// ---------------- RECONEXIÓN ----------------
 client.on("reconnect", () => {
   console.log("🔄 Reintentando conexión MQTT...");
 });
@@ -62,11 +64,17 @@ client.on("reconnect", () => {
 // ---------------- MQTT → FIREBASE ----------------
 client.on("message", (topic, message) => {
   try {
-    const value = message.toString();
+    const value = Number(message.toString());
+    const key = topic.split("/")[1];
+
+    // 🚫 evitar loop
+    if (estados[key] === value) return;
+
+    estados[key] = value;
 
     console.log("📩 MQTT:", topic, value);
 
-    db.ref(topic).set(Number(value));
+    db.ref(topic).set(value);
   } catch (error) {
     console.log("❌ Error procesando mensaje:", error);
   }
@@ -77,12 +85,17 @@ db.ref("casa").on("child_changed", snapshot => {
   const key = snapshot.key;
   const value = snapshot.val();
 
+  // 🚫 evitar loop
+  if (estados[key] === value) return;
+
+  estados[key] = value;
+
   console.log("🔁 Firebase → MQTT:", key, value);
 
   client.publish(`casa/${key}`, String(value));
 });
 
-// ================= SERVIDOR WEB (RENDER) =================
+// ================= SERVIDOR WEB =================
 const app = express();
 
 app.get("/", (req, res) => {
